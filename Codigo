@@ -1,1 +1,161 @@
+// Librerías necesarias para la comunicación SPI, el lector RFID y el servomotor
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Servo.h>
 
+// Pines utilizados por el lector RFID
+const byte PIN_SS_RFID = 10;
+const byte PIN_RST_RFID = 9;
+
+// Pin donde está conectado el servomotor
+const byte PIN_SERVO = 5;
+
+// UID de la tarjeta que tiene acceso autorizado
+// Este valor debe cambiarse por el UID real de la tarjeta
+const byte UID_AUTORIZADO[] = {0x01, 0x02, 0x03, 0x04};
+
+// Creamos el objeto para controlar el lector RFID
+MFRC522 lector(PIN_SS_RFID, PIN_RST_RFID);
+
+// Creamos el objeto para controlar el servomotor
+Servo pestillo;
+
+// Ángulos del servomotor
+const int ANGULO_CERRADO = 0;
+const int ANGULO_ABIERTO = 90;
+
+
+// --------------------------------------------------
+// FUNCIÓN: tarjetaAutorizada
+// Verifica si la tarjeta leída tiene el UID autorizado
+// --------------------------------------------------
+bool tarjetaAutorizada() {
+
+  // Primero verificamos que el tamaño del UID coincida
+  // con el tamaño del UID autorizado
+  if (lector.uid.size != sizeof(UID_AUTORIZADO)) {
+    return false;
+  }
+
+  // Comparamos byte por byte el UID de la tarjeta
+  // con el UID autorizado
+  for (byte i = 0; i < sizeof(UID_AUTORIZADO); i++) {
+
+    // Si algún byte es diferente, la tarjeta no está autorizada
+    if (lector.uid.uidByte[i] != UID_AUTORIZADO[i]) {
+      return false;
+    }
+  }
+
+  // Si todos los bytes coinciden, la tarjeta es autorizada
+  return true;
+}
+
+
+// --------------------------------------------------
+// FUNCIÓN: mostrarUID
+// Muestra en el Monitor Serial el UID de la tarjeta
+// que acaba de ser detectada
+// --------------------------------------------------
+void mostrarUID() {
+
+  Serial.print("UID leído:");
+
+  // Recorremos todos los bytes del UID
+  for (byte i = 0; i < lector.uid.size; i++) {
+
+    Serial.print(" ");
+
+    // Agregamos un 0 delante si el valor es menor a 0x10
+    if (lector.uid.uidByte[i] < 0x10)
+      Serial.print("0");
+
+    // Mostramos el UID en formato hexadecimal
+    Serial.print(lector.uid.uidByte[i], HEX);
+  }
+
+  Serial.println();
+}
+
+
+// --------------------------------------------------
+// FUNCIÓN SETUP
+// Se ejecuta una sola vez cuando Arduino inicia
+// --------------------------------------------------
+void setup() {
+
+  // Iniciamos la comunicación con el Monitor Serial
+  Serial.begin(9600);
+
+  // Iniciamos la comunicación SPI para el lector RFID
+  SPI.begin();
+
+  // Inicializamos el lector RFID
+  lector.PCD_Init();
+
+  // Conectamos el servomotor al pin correspondiente
+  pestillo.attach(PIN_SERVO);
+
+  // Colocamos inicialmente el pestillo en posición cerrada
+  pestillo.write(ANGULO_CERRADO);
+
+  // Mensaje inicial del sistema
+  Serial.println("Sistema listo. Acerque una tarjeta.");
+}
+
+
+// --------------------------------------------------
+// FUNCIÓN LOOP
+// Se ejecuta continuamente mientras Arduino está encendido
+// --------------------------------------------------
+void loop() {
+
+  // Comprobamos si hay una nueva tarjeta RFID
+  // Si no hay ninguna, termina esta repetición del loop
+  if (!lector.PICC_IsNewCardPresent())
+    return;
+
+  // Intentamos leer los datos de la tarjeta
+  // Si no se puede leer, termina esta repetición
+  if (!lector.PICC_ReadCardSerial())
+    return;
+
+  // Mostramos el UID de la tarjeta en el Monitor Serial
+  mostrarUID();
+
+
+  // Comprobamos si la tarjeta está autorizada
+  if (tarjetaAutorizada()) {
+
+    // Si está autorizada, mostramos el mensaje
+    Serial.println("Acceso permitido. Abriendo...");
+
+    // Movemos el servomotor a la posición de apertura
+    pestillo.write(ANGULO_ABIERTO);
+
+    // Mantenemos la puerta abierta durante 3 segundos
+    delay(3000);
+
+    // Después de 3 segundos comenzamos a cerrar
+    Serial.println("Cerrando...");
+
+    // Movemos el servomotor nuevamente a la posición cerrada
+    pestillo.write(ANGULO_CERRADO);
+
+  } else {
+
+    // Si el UID no coincide con el autorizado,
+    // se rechaza el acceso
+    Serial.println("Acceso denegado.");
+  }
+
+
+  // Detenemos la comunicación con la tarjeta RFID
+  lector.PICC_HaltA();
+
+  // Detenemos el sistema de autenticación de la tarjeta
+  lector.PCD_StopCrypto1();
+
+  // Pequeña pausa antes de volver a buscar otra tarjeta
+  delay(500);
+}
